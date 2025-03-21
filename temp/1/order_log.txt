@@ -1,0 +1,24 @@
+2025-03-17 09:36:12 - {
+    "request": {
+        "api_key": "AAcAJZ2GoMUm5Ys1Gg",
+        "category": "spot",
+        "symbol": "BTCUSDT",
+        "side": "Buy",
+        "orderType": "Market",
+        "marketUnit": "quoteCoin",
+        "qty": "7",
+        "timestamp": "1742193372172",
+        "recvWindow": "5000",
+        "sign": "1e97c2b20e021979b9aca07ddc89600863fca3c4cdbbde849b4442984b938f1b"
+    },
+    "response": {
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": {
+            "orderId": "1908050736055675136",
+            "orderLinkId": "1908050736089229568"
+        },
+        "retExtInfo": {},
+        "time": 1742193372684
+    }
+}
