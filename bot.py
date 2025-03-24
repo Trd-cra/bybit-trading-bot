@@ -1,3 +1,4 @@
+# bot.py
 import os
 import time
 import threading
@@ -5,139 +6,118 @@ import signal
 from dotenv import load_dotenv
 from pybit.unified_trading import HTTP, WebSocket
 import pandas as pd
+
 from trade_logic import trade_logic
 from utils import setup_logger
-from fetch_bybit_data import fetch_historical_data  # ✅ Проверяем, что импортируемая функция существует
+from fetch_bybit_data import fetch_historical_data
+from whitelist import auto_whitelist_updater, load_whitelist
+from orders import load_open_orders, save_open_orders, log_closed_trade
 
-# 🔹 Настройка логгера
-logger = setup_logger("bot.log", console_output=True)
+logger = setup_logger("logs/bot.log", console_output=True)
 
-# 🔹 Загрузка API-ключей
 load_dotenv()
 API_KEY = os.getenv("BYBIT_API_KEY")
 API_SECRET = os.getenv("BYBIT_API_SECRET")
 
 if not API_KEY or not API_SECRET:
     logger.error("❌ API_KEY или API_SECRET не установлены.")
-    raise ValueError("API_KEY и API_SECRET должны быть заданы в файле .env")
+    raise ValueError("❌ API_KEY и API_SECRET обязательны!")
 
-logger.info("✅ API-ключи успешно загружены.")
-
-# 🔹 Флаг завершения
 shutdown_event = threading.Event()
 
-# 🔹 Подключение к API (Testnet)
 try:
     session = HTTP(testnet=True, api_key=API_KEY, api_secret=API_SECRET)
-    logger.info("✅ HTTP-сессия успешно создана.")
+    logger.info("✅ HTTP-сессия создана.")
 except Exception as e:
     logger.error(f"❌ Ошибка создания HTTP-сессии: {e}")
     raise
 
-# 🔹 Получение текущей комиссии
 try:
-    fee_response = session.get_fee_rates(category="linear", symbol="BTCUSDT")
-    fee_rate = fee_response['result']['list'][0]['takerFeeRate']
-    logger.info(f"✅ Текущая комиссия taker: {fee_rate}")
+    fee_response = session.get_fee_rates(category="spot", symbol="BTCUSDT")
+    fee_rate = float(fee_response['result']['list'][0]['takerFeeRate'])
+    logger.info(f"✅ Комиссия taker: {fee_rate}")
 except Exception as e:
-    logger.error(f"❌ Ошибка получения комиссии: {e}")
-    fee_rate = None
+    fee_rate = 0.001
+    logger.warning(f"⚠️ Не удалось получить комиссию: {e}")
 
-# 🔹 Проверка наличия файла с историческими данными
-if not os.path.exists('historical_data.csv'):
-    logger.warning("⚠️ Файл historical_data.csv не найден. Запускаем загрузку...")
-    fetch_historical_data()  # 🔥 Автоматически загружаем данные
-    logger.info("✅ Исторические данные загружены.")
+def get_symbols():
+    return list(load_whitelist().get("SPOT", {}).keys())
 
-# 🔹 Загрузка исторических данных
-try:
-    df_historical = pd.read_csv('historical_data.csv')
-    df_historical = trade_logic(df_historical)
-    logger.info("✅ Исторические данные успешно загружены и обработаны.")
-except Exception as e:
-    logger.error(f"❌ Ошибка загрузки исторических данных: {e}")
-    df_historical = pd.DataFrame(columns=["timestamp", "close", "volume"])
+# auto_whitelist_updater(get_symbols_func=get_symbols, shutdown_event=shutdown_event)
 
-# 🔹 WebSocket обработчик
-def handle_message(msg):
-    global df_historical
-    try:
-        if "data" in msg:
+symbol_dataframes = {}
+open_orders = load_open_orders()
+ws_threads = []
+
+def handle_message(symbol):
+    def inner(msg):
+        if "data" not in msg:
+            return
+        try:
             price = float(msg["data"]["lastPrice"])
             volume = float(msg["data"]["volume24h"])
             timestamp = pd.Timestamp.now()
 
-            logger.info("📥 Новые данные получены.")
-
-            # ✅ Добавляем новую свечу
+            df = symbol_dataframes.get(symbol, pd.DataFrame(columns=["timestamp", "close", "volume"]))
             new_row = pd.DataFrame({"timestamp": [timestamp], "close": [price], "volume": [volume]})
+            df = pd.concat([df, new_row], ignore_index=True).iloc[-250:]
+            df = trade_logic(df)
+            symbol_dataframes[symbol] = df
 
-            # 🔥 **Исправлено**: Используем `pd.concat()` вместо `df.append()`
-            df_historical = pd.concat([df_historical, new_row], ignore_index=True)
+            signal_now = df['signal'].iloc[-1]
+            logger.info(f"🔁 [{symbol}] ➤ Цена: {price:.2f} | Объём: {volume:.2f} | Сигнал: {signal_now}")
 
-            # ✅ Ограничиваем размер истории (оптимизация памяти)
-            df_historical = df_historical.iloc[-250:]
+            qty = 10
+            if signal_now == "LONG":
+                if symbol not in open_orders:
+                    session.place_order(category="spot", symbol=symbol, side="Buy", orderType="Market", qty=qty)
+                    open_orders[symbol] = {"side": "Buy", "entry_price": price, "qty": qty}
+                    save_open_orders(open_orders)
+                    logger.info(f"🚀 [{symbol}] LONG ордер отправлен: {qty}")
+            elif signal_now == "SHORT":
+                if symbol in open_orders and open_orders[symbol]["side"] == "Buy":
+                    entry_price = open_orders[symbol]["entry_price"]
+                    qty = open_orders[symbol]["qty"]
+                    session.place_order(category="spot", symbol=symbol, side="Sell", orderType="Market", qty=qty)
 
-            # ✅ Обновляем сигналы
-            df_historical = trade_logic(df_historical)
-            signal_trade = df_historical['signal'].iloc[-1]
-
-            # ✅ Торговая логика
-            qty = 0.001
-            if signal_trade == "LONG":
-                session.place_order(category="linear", symbol="BTCUSDT", side="Buy", orderType="Market", qty=qty)
-                logger.info(f"🚀 Открыт LONG на {qty} BTC (условия EMA, RSI, MACD, Bollinger выполнены).")
-            elif signal_trade == "SHORT":
-                session.place_order(category="linear", symbol="BTCUSDT", side="Sell", orderType="Market", qty=qty)
-                logger.info(f"📉 Открыт SHORT на {qty} BTC (условия EMA, RSI, MACD, Bollinger выполнены).")
-
-    except Exception as e:
-        logger.error(f"❌ Ошибка обработки сообщения: {e}")
-
-# 🔹 WebSocket с переподключением
-def start_ws():
-    ws = None
-    while not shutdown_event.is_set():
-        try:
-            logger.info("🔄 Попытка запуска WebSocket...")
-            ws = WebSocket(channel_type="linear", api_key=API_KEY, api_secret=API_SECRET, testnet=True)
-            ws.ticker_stream(symbol="BTCUSDT", callback=handle_message)
-            logger.info("✅ WebSocket успешно запущен.")
-
-            while not shutdown_event.is_set():
-                shutdown_event.wait(1)
-
+                    pnl = (price - entry_price) * qty - (price + entry_price) * qty * fee_rate
+                    log_closed_trade(symbol, entry_price, price, qty, pnl)
+                    logger.info(f"📉 [{symbol}] SHORT ордер отправлен: {qty} | PnL: {pnl:.2f}")
+                    del open_orders[symbol]
+                    save_open_orders(open_orders)
         except Exception as e:
-            logger.error(f"❌ Ошибка WebSocket: {e}")
-            shutdown_event.wait(5)
-        finally:
-            if ws:
-                try:
-                    ws.close()
-                    logger.info("🛑 WebSocket закрыт корректно.")
-                except Exception as e:
-                    logger.error(f"❌ Ошибка при закрытии WebSocket: {e}")
+            logger.error(f"❌ Ошибка обработки данных {symbol}: {e}")
+    return inner
 
-# 🔹 Обработчик завершения
+def start_ws_for_symbol(symbol):
+    try:
+        logger.info(f"🌐 Подключаем WebSocket для {symbol}...")
+        ws = WebSocket(testnet=True, api_key=API_KEY, api_secret=API_SECRET, channel_type="spot")
+        ws.ticker_stream(symbol=symbol, callback=handle_message(symbol))
+        while not shutdown_event.is_set():
+            time.sleep(1)
+    except Exception as e:
+        logger.error(f"❌ WebSocket ошибка для {symbol}: {e}")
+
 def shutdown_handler(signum, frame):
-    logger.info("🛑 Получен сигнал на завершение работы...")
+    logger.info("🛑 Завершение работы...")
     shutdown_event.set()
 
-# 🔹 Запуск бота
 if __name__ == "__main__":
-    logger.info("🚀 Бот запущен и ждет сигналов.")
-
-    # ✅ Добавляем обработчик завершения
     signal.signal(signal.SIGINT, shutdown_handler)
     signal.signal(signal.SIGTERM, shutdown_handler)
 
-    ws_thread = threading.Thread(target=start_ws, daemon=True)
-    ws_thread.start()
+    logger.info("🚀 Бот стартует...")
+    whitelist = get_symbols()
+    if not whitelist:
+        logger.warning("⚠️ Вайтлист пуст. Проверь whitelist.json")
+    else:
+        logger.info(f"✅ Вайтлист загружен: {len(whitelist)} пар.")
 
-    try:
-        while not shutdown_event.is_set():
-            shutdown_event.wait(1)
-    except Exception as e:
-        logger.error(f"❌ Ошибка в главном потоке: {e}")
-    finally:
-        logger.info("✅ Бот остановлен.")
+    for symbol in whitelist:
+        t = threading.Thread(target=start_ws_for_symbol, args=(symbol,), daemon=True)
+        ws_threads.append(t)
+        t.start()
+
+    while not shutdown_event.is_set():
+        time.sleep(1)

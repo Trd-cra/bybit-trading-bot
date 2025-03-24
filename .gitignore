@@ -1,17 +1,3 @@
-# Виртуальное окружение
 venv/
-
-# Файлы конфигурации
-.env
-
-# Логи
-*.log
-
-# Данные
-historical_data.csv
-trading_signals.csv
-
-# Бэкапы и системные файлы
 *.pyc
 __pycache__/
-.DS_Store

@@ -1,0 +1,20 @@
+# виртуальные окружения
+venv/
+__pycache__/
+*.pyc
+
+# системные файлы
+.DS_Store
+
+# логи
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# данные
+*.csv
+*.txt
+*.out
+temp/

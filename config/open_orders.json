@@ -1,0 +1,27 @@
+{
+  "BTCUSDT": {
+    "side": "Buy",
+    "entry_price": 93943.6,
+    "qty": 10
+  },
+  "ETHUSDT": {
+    "side": "Buy",
+    "entry_price": 2195.78,
+    "qty": 10
+  },
+  "BNBUSDT": {
+    "side": "Buy",
+    "entry_price": 626.97559,
+    "qty": 10
+  },
+  "ADAUSDT": {
+    "side": "Buy",
+    "entry_price": 0.815,
+    "qty": 10
+  },
+  "SOLUSDT": {
+    "side": "Buy",
+    "entry_price": 147.5455,
+    "qty": 10
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "SPOT": {
+    "BTCUSDT": true,
+    "ETHUSDT": true,
+    "SOLUSDT": true,
+    "XRPUSDT": true,
+    "BNBUSDT": true,
+    "DOGEUSDT": true,
+    "AVAXUSDT": true,
+    "ADAUSDT": true,
+    "DOTUSDT": true,
+    "MATICUSDT": true,
+    "LTCUSDT": true,
+    "LINKUSDT": true,
+    "ARBUSDT": true,
+    "TONUSDT": true,
+    "NEARUSDT": true,
+    "APTUSDT": true,
+    "FILUSDT": true,
+    "ICPUSDT": true,
+    "RUNEUSDT": true,
+    "INJUSDT": true,
+    "OPUSDT": true
+  }
+}
